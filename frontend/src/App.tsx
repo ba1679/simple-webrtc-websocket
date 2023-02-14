@@ -18,6 +18,7 @@ function App() {
   const peerB = useRef<RTCPeerConnection | null>();
 
   const [localStream, setLocalStream] = useState<MediaStream | null>();
+  const [account, setAccount] = useState<string | null>();
 
   const getRemoteSteam = (e: RTCTrackEvent) => {
     // 监听是否有媒体流接入，如果有就赋值给 remoteVideo 的 src
@@ -108,6 +109,10 @@ function App() {
     peerB.current = null;
   };
 
+  const join = () => {
+    console.log('join', account);
+  };
+
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia(constraints)
@@ -143,6 +148,18 @@ function App() {
         playsInline></video>
       <button onClick={call}>call</button>
       <button onClick={hangup}>hangup</button>
+      <div>
+        <label htmlFor='account'>加入房間</label>
+        <input
+          type='text'
+          id='account'
+          onChange={(e) => setAccount(e.target.value)}
+          onKeyUp={(e) => {
+            if (e.key === 'Enter') join();
+          }}
+        />
+        <button onClick={join}>確定</button>
+      </div>
     </div>
   );
 }
