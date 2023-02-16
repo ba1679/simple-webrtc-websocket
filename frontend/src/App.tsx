@@ -1,167 +1,183 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
+import { io, Socket } from 'socket.io-client';
 
 const constraints: MediaStreamConstraints = {
   audio: true,
   video: true,
 };
 
-const offerOption: RTCOfferOptions = {
+const server: RTCConfiguration = {
+  iceServers: [
+    {
+      urls: 'stun:global.stun.twilio.com:3478',
+    },
+    {
+      username:
+        '5846a73f31aebf8e6ff2ed8488a30fc5094af030a81a30d315f98047e0656a28',
+      urls: 'turn:global.turn.twilio.com:3478?transport=udp',
+      credential: '0SHP8I2jrWXsnygCsCQpj7Dp02wPqeHS6YNuyysarj8=',
+    },
+    {
+      username:
+        '5846a73f31aebf8e6ff2ed8488a30fc5094af030a81a30d315f98047e0656a28',
+      urls: 'turn:global.turn.twilio.com:3478?transport=tcp',
+      credential: '0SHP8I2jrWXsnygCsCQpj7Dp02wPqeHS6YNuyysarj8=',
+    },
+    {
+      username:
+        '5846a73f31aebf8e6ff2ed8488a30fc5094af030a81a30d315f98047e0656a28',
+      urls: 'turn:global.turn.twilio.com:443?transport=tcp',
+      credential: '0SHP8I2jrWXsnygCsCQpj7Dp02wPqeHS6YNuyysarj8=',
+    },
+  ],
+};
+
+const signalOption: RTCOfferOptions = {
   offerToReceiveAudio: true,
   offerToReceiveVideo: true,
 };
 
-function App() {
-  const localVideo = useRef<HTMLVideoElement | null>(null);
-  const remoteVideo = useRef<HTMLVideoElement | null>(null);
+const socket = io('http://localhost:8080');
 
-  const peerA = useRef<RTCPeerConnection | null>();
-  const peerB = useRef<RTCPeerConnection | null>();
+function APP() {
+  const [room, setRoom] = React.useState<string>('123');
 
-  const [localStream, setLocalStream] = useState<MediaStream | null>();
-  const [account, setAccount] = useState<string | null>();
+  const localVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const peerA = React.useRef<RTCPeerConnection | null>(null);
 
-  const getRemoteSteam = (e: RTCTrackEvent) => {
-    // 监听是否有媒体流接入，如果有就赋值给 remoteVideo 的 src
-    if (remoteVideo.current && remoteVideo.current.srcObject !== e.streams[0]) {
-      remoteVideo.current.srcObject = e.streams[0];
-    }
+  const sendSignalingMessage = (
+    sdp: RTCSessionDescription | null,
+    offer: boolean
+  ) => {
+    const isOffer = offer ? 'offer' : 'answer';
+    console.log(`Sending ${isOffer}`);
+    socket?.emit('peerConnectSignaling', {
+      sdp,
+      room,
+    });
   };
 
-  const onCreateAnswer = async (desc: RTCSessionDescriptionInit) => {
+  const createSignal = async (isOffer: boolean) => {
     try {
-      await peerB.current?.setLocalDescription(desc);
-    } catch (err) {
-      console.log('Answer-setLocalDescription: ', err);
-    }
-
-    try {
-      await peerA.current?.setRemoteDescription(desc);
-    } catch (err) {
-      console.log('Answer-setRemoteDescription: ', err);
-    }
-  };
-
-  const onCreateOffer = async (desc: RTCSessionDescriptionInit) => {
-    try {
-      await peerA.current?.setLocalDescription(desc);
-    } catch (err) {
-      console.log('Offer-setLocalDescription: ', err);
-    }
-
-    try {
-      await peerB.current?.setRemoteDescription(desc);
-    } catch (err) {
-      console.log('Offer-setRemoteDescription: ', err);
-    }
-
-    try {
-      const answer = await peerB.current?.createAnswer();
-      await onCreateAnswer(answer as RTCSessionDescriptionInit);
-    } catch (err) {
-      console.log('Offer-setRemoteDescription: ', err);
-    }
-  };
-
-  const initPeer = () => {
-    // 創建 RTCPeerConnention
-    peerA.current = new RTCPeerConnection();
-    if (!localStream) return;
-    // 添加本地流
-    localStream
-      .getTracks()
-      .forEach((track) => peerA.current?.addTrack(track, localStream));
-    // 監聽 A 的ICE候選信息,如果收集到，就添加給 B
-    peerA.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        peerB.current?.addIceCandidate(event.candidate);
+      if (!peerA.current) {
+        console.log('尚未開啟視訊');
+        return;
       }
-    };
-
-    // 創建呼叫端
-    peerB.current = new RTCPeerConnection();
-    peerB.current.ontrack = getRemoteSteam;
-
-    // 监听 B 的ICE候选信息
-    // 如果收集到，就添加给 A
-    peerB.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        peerA.current?.addIceCandidate(event.candidate);
-      }
-    };
-  };
-
-  const call = async () => {
-    if (!peerA.current || !peerB.current) {
-      initPeer();
+      const offer = await peerA.current[
+        `create${isOffer ? 'Offer' : 'Answer'}`
+      ](signalOption);
+      await peerA.current.setLocalDescription(offer);
+      sendSignalingMessage(
+        peerA.current.localDescription,
+        isOffer ? true : false
+      );
+    } catch (error) {
+      console.log('create signal error :', error);
     }
-    try {
-      const offer = await peerA.current?.createOffer(offerOption);
-      await onCreateOffer(offer as RTCSessionDescriptionInit);
-    } catch (err) {
-      console.log(err);
-    }
-  };
-
-  const hangup = () => {
-    peerA.current?.close();
-    peerB.current?.close();
-    peerA.current = null;
-    peerB.current = null;
-  };
-
-  const join = () => {
-    console.log('join', account);
   };
 
   useEffect(() => {
-    navigator.mediaDevices
-      .getUserMedia(constraints)
-      .then((stream) => {
-        setLocalStream(stream);
-        if (localVideo.current) {
-          localVideo.current.srcObject = stream;
-        }
-        // 初始化 RTCPeerConnention
-        initPeer();
-      })
-      .catch((err) => {
-        console.log(err);
-      });
+    // 設定 socket 事件
+    socket.on('peerConnectSignaling', async (message) => {
+      if (message.sdp && !peerA.current?.currentRemoteDescription) {
+        console.log('sdp', message.sdp);
+        await peerA.current?.setRemoteDescription(
+          new RTCSessionDescription(message.sdp)
+        );
+        await createSignal(message.sdp.type === 'answer' ? true : false);
+      } else if (message.candidate) {
+        // console.log('candidate', candidate);
+        peerA.current?.addIceCandidate(new RTCIceCandidate(message.candidate));
+      }
+    });
+
+    socket.on('roomBroadcast', (message) => {
+      console.log('房間廣播 => ', message);
+    });
   }, []);
 
+  const init = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      if (stream && localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+
+        // create peer connection
+        peerA.current = new RTCPeerConnection(server);
+        console.log('create peer connection');
+
+        // add stream to peer connection
+        stream.getTracks().forEach((track) => {
+          peerA.current?.addTrack(track, stream);
+        });
+
+        // 如果有 candidates 就傳去 server
+        peerA.current.onicecandidate = (event) => {
+          if (event.candidate) {
+            // console.log('ice candidate A', event.candidate);
+            socket?.emit('peerConnectSignaling', {
+              candidate: event.candidate,
+              room,
+            });
+          }
+        };
+
+        // 監聽是否有流傳入，如果有的話就顯示影像
+        peerA.current.ontrack = (event) => {
+          if (
+            remoteVideoRef.current &&
+            !remoteVideoRef.current.srcObject &&
+            event.streams[0]
+          ) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+            console.log('接收流並顯示於遠端視訊！', event);
+          }
+        };
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  const joinRoom = () => {
+    if (!room) return;
+    socket?.emit('joinRoom', room);
+  };
+
   return (
-    <div className='App'>
-      <video
-        width='200'
-        height='200'
-        className='rtc'
-        autoPlay
-        ref={localVideo}
-        muted
-        playsInline></video>
-      <video
-        width='200'
-        height='200'
-        className='rtc'
-        autoPlay
-        ref={remoteVideo}
-        playsInline></video>
-      <button onClick={call}>call</button>
-      <button onClick={hangup}>hangup</button>
+    <div>
       <div>
-        <label htmlFor='account'>加入房間</label>
+        <button onClick={init}>初始化</button>
+
         <input
           type='text'
-          id='account'
-          onChange={(e) => setAccount(e.target.value)}
-          onKeyUp={(e) => {
-            if (e.key === 'Enter') join();
-          }}
+          placeholder='enter the room id'
+          value={room}
+          onChange={(e) => setRoom(e.target.value)}
         />
-        <button onClick={join}>確定</button>
+        <button onClick={joinRoom}>join room</button>
+
+        <button onClick={() => createSignal(true)}>send offer</button>
+
+        <video
+          width='200'
+          height='200'
+          autoPlay
+          ref={localVideoRef}
+          muted
+          playsInline></video>
+
+        <video
+          width='500'
+          height='500'
+          autoPlay
+          ref={remoteVideoRef}
+          playsInline></video>
       </div>
     </div>
   );
 }
 
-export default App;
+export default APP;
