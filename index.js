@@ -29,6 +29,8 @@ function findNowRoom (client) {
 io.on('connection', (client) => {
   console.log(`socket 用戶連接 ${client.id}`);
 
+  client.emit('ready',{id: client.id});
+
   client.on('joinRoom', (room) => {
     console.log(room);
 
@@ -37,6 +39,7 @@ io.on('connection', (client) => {
       client.leave(nowRoom);
     }
     client.join(room);
+    // sending message to user in room except the sender
     client.to(room).emit('roomBroadcast', '已有新人加入聊天室！')
   });
 
@@ -44,6 +47,7 @@ io.on('connection', (client) => {
     console.log('接收資料：', message);
 
     const nowRoom = findNowRoom(client);
+    // sending message to user in room except the sender
     client.to(nowRoom).emit('peerConnectSignaling', message);
   });
 

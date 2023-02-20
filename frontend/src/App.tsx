@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 
 const constraints: MediaStreamConstraints = {
   audio: true,
@@ -44,7 +44,7 @@ function APP() {
 
   const localVideoRef = React.useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = React.useRef<HTMLVideoElement | null>(null);
-  const peerA = React.useRef<RTCPeerConnection | null>(null);
+  const peer = React.useRef<RTCPeerConnection | null>(null);
 
   const sendSignalingMessage = (
     sdp: RTCSessionDescription | null,
@@ -60,16 +60,17 @@ function APP() {
 
   const createSignal = async (isOffer: boolean) => {
     try {
-      if (!peerA.current) {
+      if (!peer.current) {
         console.log('尚未開啟視訊');
         return;
       }
-      const offer = await peerA.current[
-        `create${isOffer ? 'Offer' : 'Answer'}`
-      ](signalOption);
-      await peerA.current.setLocalDescription(offer);
+      const offer = await peer.current[`create${isOffer ? 'Offer' : 'Answer'}`](
+        signalOption
+      );
+      await peer.current.setLocalDescription(offer);
+      console.log('local peer set local description');
       sendSignalingMessage(
-        peerA.current.localDescription,
+        peer.current.localDescription,
         isOffer ? true : false
       );
     } catch (error) {
@@ -79,16 +80,25 @@ function APP() {
 
   useEffect(() => {
     // 設定 socket 事件
+
+    socket.on('ready', (id) => {
+      console.log('socket ready', id);
+    });
+
     socket.on('peerConnectSignaling', async (message) => {
-      if (message.sdp && !peerA.current?.currentRemoteDescription) {
+      if (message.sdp && !peer.current?.currentRemoteDescription) {
         console.log('sdp', message.sdp);
-        await peerA.current?.setRemoteDescription(
+        await peer.current?.setRemoteDescription(
           new RTCSessionDescription(message.sdp)
         );
-        await createSignal(message.sdp.type === 'answer' ? true : false);
+
+        if (message.sdp.type !== 'answer') {
+          // if received offer, send answer
+          await createSignal(false);
+        }
       } else if (message.candidate) {
         // console.log('candidate', candidate);
-        peerA.current?.addIceCandidate(new RTCIceCandidate(message.candidate));
+        peer.current?.addIceCandidate(new RTCIceCandidate(message.candidate));
       }
     });
 
@@ -105,18 +115,18 @@ function APP() {
         localVideoRef.current.srcObject = stream;
 
         // create peer connection
-        peerA.current = new RTCPeerConnection(server);
+        peer.current = new RTCPeerConnection(server);
         console.log('create peer connection');
 
         // add stream to peer connection
         stream.getTracks().forEach((track) => {
-          peerA.current?.addTrack(track, stream);
+          peer.current?.addTrack(track, stream);
         });
 
-        // 如果有 candidates 就傳去 server
-        peerA.current.onicecandidate = (event) => {
+        // 如果有 candidates 就傳去 server (when setLocalDescription, will fire onicecandidate)
+        peer.current.onicecandidate = (event) => {
           if (event.candidate) {
-            // console.log('ice candidate A', event.candidate);
+            console.log('ice candidate : ', event.candidate);
             socket?.emit('peerConnectSignaling', {
               candidate: event.candidate,
               room,
@@ -125,7 +135,7 @@ function APP() {
         };
 
         // 監聽是否有流傳入，如果有的話就顯示影像
-        peerA.current.ontrack = (event) => {
+        peer.current.ontrack = (event) => {
           if (
             remoteVideoRef.current &&
             !remoteVideoRef.current.srcObject &&
